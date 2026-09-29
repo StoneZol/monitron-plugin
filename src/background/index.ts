@@ -67,6 +67,12 @@ function broadcastStatus() {
     .catch(() => {})
 }
 
+function broadcastBusReset() {
+  chrome.runtime
+    .sendMessage({ type: 'BUS_RESET' } satisfies BgMessage)
+    .catch(() => {})
+}
+
 /** Keep header `src://` in sync when YouTube (etc.) renames the tab. */
 async function syncCaptureLabel() {
   const tabId = status.captureTabId
@@ -159,6 +165,7 @@ async function stopCapture() {
   status.captureLabel = null
   stopLabelPoll()
   broadcastStatus()
+  broadcastBusReset()
 }
 
 chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse) => {
@@ -205,6 +212,7 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
       status.captureLabel = null
       stopLabelPoll()
       broadcastStatus()
+      broadcastBusReset()
       return false
 
     case 'OFFSCREEN_ERROR':
@@ -213,9 +221,12 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
       status.analysing = false
       stopLabelPoll()
       broadcastStatus()
+      broadcastBusReset()
       return false
 
     case 'AUDIO_FRAME':
+      // Ignore late frames after disconnect.
+      if (!status.hasStream) return false
       // Popup bus always sees frames; Monitron pages only when reactive is on.
       if (status.eqEnabled) {
         void forwardFrameToMonitron(message.frame)

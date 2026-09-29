@@ -41,6 +41,7 @@ export type BgMessage =
   | { type: 'STATUS'; status: ExtensionStatus }
   | { type: 'AUDIO_FRAME'; frame: AudioFrame }
   | { type: 'BUS_TAP'; frame: AudioFrame }
+  | { type: 'BUS_RESET' }
   | { type: 'OFFSCREEN_READY' }
   | { type: 'OFFSCREEN_CAPTURE_STARTED'; label: string; tabId: number }
   | { type: 'OFFSCREEN_CAPTURE_STOPPED' }

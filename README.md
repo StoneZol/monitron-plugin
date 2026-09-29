@@ -1,8 +1,18 @@
+<p align="center">
+  <img src="public/MonitronLogo.png" alt="Monitron" width="128" />
+</p>
+
 # Monitron Chrome Extension
 
-Captures audio from a Chromium tab and streams live EQ bands (`bass` / `mid` / `high` / `beat`) into any page that speaks the **audio bus** protocol via `window.postMessage`.
+Chrome extension that captures audio from a browser tab and feeds live EQ bands into **Monitron** dynamic screensavers on [Monitron](https://monitron-web-gamma.vercel.app/).
+
+Captures tab audio (`bass` / `mid` / `high` / `beat`) and streams them via `window.postMessage` to any allowlisted page that speaks the **audio bus** protocol.
 
 Source of truth in this repo: `src/shared/protocol.ts` (mirrors `monitron-web/lib/audioBus.ts`).
+
+| Idle → connect                               | Listening + live bus                              |
+| -------------------------------------------- | ------------------------------------------------- |
+| ![Popup — focused tab, connect](docs/m0.png) | ![Popup — listening, live audio-bus](docs/m1.png) |
 
 ## Setup
 
@@ -14,15 +24,16 @@ npm run build   # or: npm run dev
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
 3. **Load unpacked** → this repo’s `dist/` folder
-4. Open [Matrix (deploy)](https://monitron-web-gamma.vercel.app/s/matrix) (or local `http://localhost:3000/s/matrix`)
-5. Focus a tab with audio → extension popup → **connect**
+4. Open the library: [monitron-web-gamma.vercel.app](https://monitron-web-gamma.vercel.app/) (or local `http://localhost:3000`)
+5. Pick a screen marked **reactive** (audio-bus capable savers only)
+6. Focus a tab with audio → extension popup → **connect**
 
 ## Smoke test
 
-1. Open https://monitron-web-gamma.vercel.app/s/matrix — UI should show the visualizer as talking to the extension (`hello` / not offline).
+1. Open https://monitron-web-gamma.vercel.app/ — open a **reactive** screen. The HUD should show the extension as online (`hello` / not offline).
 2. Focus a tab that is playing audio → extension popup → **connect**.
-3. Turn **reactive** on — Matrix should move with bass / beat from `audio-frame`.
-4. Turn reactive off → analysis stops; bands go idle until re-enabled.
+3. Turn **reactive** on — the screen should move with bass / beat from `audio-frame`.
+4. Turn **reactive** off → page stops using bands; bus in the popup can still move while capture is up.
 
 ## Integrator API (page ↔ extension)
 
@@ -166,25 +177,15 @@ Current origins (see `hosts.ts`):
 
 - `http://localhost:3000`
 - `http://127.0.0.1:3000`
-- `https://monitron-web-gamma.vercel.app` — deploy, e.g. [Matrix](https://monitron-web-gamma.vercel.app/s/matrix)
+- `https://monitron-web-gamma.vercel.app` — deploy / [library](https://monitron-web-gamma.vercel.app/)
 
-To plug in your own site: add the origin to `MONITORN_ORIGINS` (and set
-`MONITORN_APP_ORIGIN` if it should be the popup feed), rebuild, reload the extension.
+For a **local fork**, add your origin to `MONITORN_ORIGINS` (and `MONITORN_APP_ORIGIN` if it should be the popup feed), rebuild, reload.
 
-### Can we allow _all_ sites as receivers?
+### Want your site in the official build?
 
-Technically yes (`<all_urls>` / `*://*/*` in both places). We **do not** do that by default:
+We keep a tight receiver allowlist (no `<all_urls>`). If you want your origin shipped in the upstream extension, [open an issue](https://github.com/StoneZol/monitron-plugin/issues) with the exact origin(s) and a short note on the project.
 
-- Install prompt becomes “read and change data on all websites”
-- Content script would run on every page (perf + privacy)
-- Chrome Web Store review is much harder
-
-Recommended approaches:
-
-1. **Allowlist** — add specific `https://your.domain/*` (current model)
-2. Later: **optional permissions** — user grants a custom origin at runtime (`permissions.request`) without shipping `<all_urls>` for everyone
-
-Audio sources stay unrestricted either way.
+Audio sources (YouTube, etc.) stay unrestricted either way.
 
 ## Architecture
 
