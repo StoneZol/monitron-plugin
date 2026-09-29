@@ -2,10 +2,13 @@
 
 import type { AudioFrame } from './protocol'
 
-export const MONITORN_TAB_URLS = [
-  'http://localhost:3000/*',
-  'http://127.0.0.1:3000/*',
-] as const
+export {
+  MONITORN_APP_URL,
+  MONITORN_MATCH_PATTERNS,
+  MONITORN_ORIGINS,
+  MONITORN_TAB_URLS,
+  isMonitronTabUrl,
+} from './hosts'
 
 export type ExtensionStatus = {
   hasStream: boolean
@@ -13,8 +16,6 @@ export type ExtensionStatus = {
   eqEnabled: boolean
   captureTabId: number | null
   captureLabel: string | null
-  /** offscreen = silent background analyser (no floating window) */
-  captureMode: 'offscreen' | null
   error: string | null
 }
 
@@ -29,7 +30,6 @@ export type TabInfo = {
 
 export type BgMessage =
   | { type: 'GET_STATUS' }
-  | { type: 'ENSURE_OFFSCREEN' }
   | {
       type: 'START_CAPTURE'
       streamId: string
@@ -54,6 +54,4 @@ export type BgMessage =
   | { type: 'OFFSCREEN_STOP_CAPTURE' }
   | { type: 'OFFSCREEN_SET_ANALYSING'; enabled: boolean }
 
-export type ContentMessage =
-  | { type: 'AUDIO_FRAME'; frame: AudioFrame }
-  | { type: 'PING' }
+export type ContentMessage = { type: 'AUDIO_FRAME'; frame: AudioFrame }

@@ -153,50 +153,71 @@ function BusMeters({
   )
 }
 
-/** Collapsible live tap — for popup. */
+const SOURCE_LINKS = [
+  {
+    label: 'monitron-plugin',
+    href: 'https://github.com/StoneZol/monitron-plugin',
+    hint: 'this extension',
+  },
+  {
+    label: 'monitron-web',
+    href: 'https://github.com/StoneZol/monitron-web',
+    hint: 'screens / library',
+  },
+] as const
+
+type PanelId = 'bus' | 'src' | null
+
+/** Bus meters + source links — one shared frame, toggles on one row. */
 export function DebugMenu() {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState<PanelId>(null)
   const snap = useAudioBus()
 
-  return (
-    <section className="border border-dashed border-warn/50 bg-warn/5 p-2">
-      <button
-        type="button"
-        className="btn-stamp btn-stamp-warn"
-        onClick={() => setOpen((v) => !v)}
-      >
-        bus {open ? '▼' : '▶'}
-      </button>
-      {open && <div className="mt-2"><BusMeters {...snap} /></div>}
-    </section>
-  )
-}
-
-/** Always-on bus panel — for side dock (guides later). */
-export function BusDock() {
-  const snap = useAudioBus()
+  function toggle(id: Exclude<PanelId, null>) {
+    setOpen((prev) => (prev === id ? null : id))
+  }
 
   return (
-    <div className="atmosphere relative flex min-h-screen flex-col p-3.5 pb-4">
-      <div className="relative z-10 flex flex-col gap-3">
-        <header>
-          <p className="m-0 font-mono text-[10px] uppercase tracking-[0.28em] text-signal/80">
-            signal capture
-          </p>
-          <h1 className="mt-1 mb-0 font-display text-xl font-bold uppercase tracking-[-0.04em] text-ink">
-            Monitron
-          </h1>
-          <p className="mt-1 mb-0 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-            dock // bus
-          </p>
-        </header>
-
-        <p className="m-0 text-[12px] leading-snug text-muted">
-          Connect from the toolbar popup. Guides land here later.
-        </p>
-
-        <BusMeters {...snap} />
+    <section className="border border-dashed border-line bg-screen/40 p-2">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          className="btn-stamp btn-stamp-ghost"
+          onClick={() => toggle('bus')}
+        >
+          bus {open === 'bus' ? '▼' : '▶'}
+        </button>
+        <button
+          type="button"
+          className="btn-stamp btn-stamp-ghost"
+          onClick={() => toggle('src')}
+        >
+          src {open === 'src' ? '▼' : '▶'}
+        </button>
       </div>
-    </div>
+
+      {open === 'bus' && (
+        <div className="mt-2">
+          <BusMeters {...snap} />
+        </div>
+      )}
+
+      {open === 'src' && (
+        <div className="mt-2 flex flex-col gap-1.5 font-mono text-[10px] tracking-[0.06em]">
+          {SOURCE_LINKS.map((link) => (
+            <a
+              key={link.href}
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-baseline justify-between gap-2 border border-line bg-screen/60 px-2 py-1.5 text-ink no-underline transition-colors hover:border-signal hover:text-signal"
+            >
+              <span className="text-signal">{link.label}</span>
+              <span className="truncate text-muted">{link.hint} →</span>
+            </a>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }

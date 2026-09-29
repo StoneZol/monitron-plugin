@@ -237,7 +237,9 @@ chrome.runtime.onMessage.addListener((message: BgMessage) => {
       void teardownCapture()
       break
     case 'OFFSCREEN_SET_ANALYSING':
-      if (capture) startLoop()
+      if (!capture) break
+      if (message.enabled) startLoop()
+      else stopLoop()
       break
     default:
       break
