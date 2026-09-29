@@ -11,6 +11,7 @@ type AnalyserState = {
   time: Uint8Array<ArrayBuffer>
   label: string
   tabId: number
+  keepAliveId: number
 }
 
 let capture: AnalyserState | null = null
@@ -20,6 +21,8 @@ let prevKick = 0
 let prevBeat = 0
 /** Rolling bass floor so sustained techno subs don't peg at 1.0 */
 let bassFloor = 0.25
+/** performance.now() when current capture started — frame.t is elapsed from here. */
+let captureT0 = 0
 
 function clip01(n: number) {
   return Math.min(1, Math.max(0, n))
@@ -114,15 +117,12 @@ function stopLoop() {
 function tick() {
   if (!analysing || !capture) return
 
-  if (capture.ctx.state === 'suspended') {
-    void capture.ctx.resume()
-  }
-
   const bands = computeBands(capture)
+  const t = performance.now() - captureT0
   chrome.runtime
     .sendMessage({
       type: 'AUDIO_FRAME',
-      frame: makeFrame({ t: performance.now(), ...bands }),
+      frame: makeFrame({ t, ...bands }),
     } satisfies BgMessage)
     .catch(() => {})
 }
@@ -135,15 +135,21 @@ function startLoop() {
   tick()
 }
 
+function ensureCtxRunning(ctx: AudioContext) {
+  if (ctx.state === 'suspended') void ctx.resume()
+}
+
 async function teardownCapture() {
   stopLoop()
   if (!capture) return
+  window.clearInterval(capture.keepAliveId)
   capture.stream.getTracks().forEach((t) => t.stop())
   await capture.ctx.close().catch(() => {})
   capture = null
   prevKick = 0
   prevBeat = 0
   bassFloor = 0.25
+  captureT0 = 0
   chrome.runtime
     .sendMessage({ type: 'OFFSCREEN_CAPTURE_STOPPED' } satisfies BgMessage)
     .catch(() => {})
@@ -190,9 +196,14 @@ async function startTabCapture(streamId: string, tabId: number, label: string) {
     analyser.minDecibels = -85
     analyser.maxDecibels = -25
 
-    // tabCapture mutes the source tab unless we play the stream out.
+    // tabCapture mutes the source tab unless we play the stream out (full level).
     source.connect(analyser)
     analyser.connect(ctx.destination)
+
+    // Suspended AudioContext ⇒ Chrome mutes the tab. Keep ctx awake without
+    // changing the audio graph / gain.
+    ctx.onstatechange = () => ensureCtxRunning(ctx)
+    const keepAliveId = window.setInterval(() => ensureCtxRunning(ctx), 500)
 
     audioTracks.forEach((track) => {
       track.addEventListener('ended', () => {
@@ -208,7 +219,9 @@ async function startTabCapture(streamId: string, tabId: number, label: string) {
       time: new Uint8Array(new ArrayBuffer(analyser.fftSize)),
       label,
       tabId,
+      keepAliveId,
     }
+    captureT0 = performance.now()
 
     chrome.runtime
       .sendMessage({
