@@ -62,14 +62,12 @@ function BandMeter({
 
 function useAudioBus() {
   const [bus, setBus] = useState<BusSnap | null>(null)
-  const [busAgeMs, setBusAgeMs] = useState<number | null>(null)
   const [lastFrameAgeMs, setLastFrameAgeMs] = useState<number | null>(null)
   const busRef = useRef({
     lastUi: 0,
     frames: 0,
     windowStart: performance.now(),
     receivedAt: 0,
-    sessionStart: 0,
   })
 
   useEffect(() => {
@@ -79,7 +77,6 @@ function useAudioBus() {
         frames: 0,
         windowStart: performance.now(),
         receivedAt: 0,
-        sessionStart: 0,
       }
       setBus({
         bass: 0,
@@ -89,7 +86,6 @@ function useAudioBus() {
         t: 0,
         fps: 0,
       })
-      setBusAgeMs(null)
       setLastFrameAgeMs(null)
     }
 
@@ -98,17 +94,13 @@ function useAudioBus() {
         reset()
         return
       }
-      if (message.type === 'STATUS' && !message.status.hasStream) {
-        reset()
-        return
-      }
-      if (message.type !== 'BUS_TAP' && message.type !== 'AUDIO_FRAME') return
+      // BUS_TAP only — AUDIO_FRAME is also broadcast and would double-count.
+      if (message.type !== 'BUS_TAP') return
       const frame: AudioFrame = message.frame
       const now = performance.now()
       const state = busRef.current
       state.frames += 1
       state.receivedAt = now
-      if (!state.sessionStart) state.sessionStart = now
 
       if (now - state.lastUi < 80) return
       state.lastUi = now
@@ -128,32 +120,29 @@ function useAudioBus() {
         t: frame.t,
         fps,
       })
-      setBusAgeMs(now - state.sessionStart)
       setLastFrameAgeMs(0)
     }
 
     chrome.runtime.onMessage.addListener(onMessage)
-    const ageTimer = window.setInterval(() => {
-      const { sessionStart, receivedAt } = busRef.current
-      if (!sessionStart) {
-        setBusAgeMs(null)
+    const staleTimer = window.setInterval(() => {
+      const { receivedAt } = busRef.current
+      if (!receivedAt) {
         setLastFrameAgeMs(null)
         return
       }
-      const now = performance.now()
-      setBusAgeMs(now - sessionStart)
-      setLastFrameAgeMs(receivedAt ? now - receivedAt : null)
+      setLastFrameAgeMs(performance.now() - receivedAt)
     }, 200)
 
     return () => {
       chrome.runtime.onMessage.removeListener(onMessage)
-      window.clearInterval(ageTimer)
+      window.clearInterval(staleTimer)
     }
   }, [])
 
   return {
     bus,
-    busAgeMs,
+    // frame.t is ms since capture start (same value shown as t=).
+    busAgeMs: bus != null && bus.t > 0 ? bus.t : null,
     busLive: lastFrameAgeMs != null && lastFrameAgeMs < 500,
   }
 }
