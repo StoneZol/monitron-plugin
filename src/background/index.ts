@@ -8,7 +8,6 @@ const status: ExtensionStatus = {
   eqEnabled: false,
   captureTabId: null,
   captureLabel: null,
-  captureMode: null,
   error: null,
 }
 
@@ -68,6 +67,12 @@ function broadcastStatus() {
     .catch(() => {})
 }
 
+function broadcastBusReset() {
+  chrome.runtime
+    .sendMessage({ type: 'BUS_RESET' } satisfies BgMessage)
+    .catch(() => {})
+}
+
 /** Keep header `src://` in sync when YouTube (etc.) renames the tab. */
 async function syncCaptureLabel() {
   const tabId = status.captureTabId
@@ -114,7 +119,11 @@ async function forwardFrameToMonitron(frame: AudioFrame) {
   )
 }
 
-async function startCapture(streamId: string, tabId: number, label: string) {
+async function startCapture(
+  streamId: string,
+  tabId: number,
+  label: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   status.error = null
   broadcastStatus()
   try {
@@ -125,15 +134,17 @@ async function startCapture(streamId: string, tabId: number, label: string) {
       tabId,
       label,
     } satisfies BgMessage)
+    return { ok: true }
   } catch (err) {
-    status.error = err instanceof Error ? err.message : String(err)
+    const error = err instanceof Error ? err.message : String(err)
+    status.error = error
     status.hasStream = false
     status.analysing = false
     status.captureTabId = null
     status.captureLabel = null
-    status.captureMode = null
     stopLabelPoll()
     broadcastStatus()
+    return { ok: false, error }
   }
 }
 
@@ -152,9 +163,9 @@ async function stopCapture() {
   status.analysing = false
   status.captureTabId = null
   status.captureLabel = null
-  status.captureMode = null
   stopLabelPoll()
   broadcastStatus()
+  broadcastBusReset()
 }
 
 chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse) => {
@@ -163,20 +174,9 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
       sendResponse(status)
       return false
 
-    case 'ENSURE_OFFSCREEN':
-      void ensureOffscreen()
-        .then(() => sendResponse({ ok: true }))
-        .catch((err: unknown) =>
-          sendResponse({
-            ok: false,
-            error: err instanceof Error ? err.message : String(err),
-          }),
-        )
-      return true
-
     case 'START_CAPTURE':
       void startCapture(message.streamId, message.tabId, message.label).then(
-        () => sendResponse({ ok: true }),
+        (result) => sendResponse(result),
       )
       return true
 
@@ -187,14 +187,6 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
     case 'EQ_TOGGLE':
       status.eqEnabled = message.enabled
       broadcastStatus()
-      if (status.hasStream) {
-        chrome.runtime
-          .sendMessage({
-            type: 'OFFSCREEN_SET_ANALYSING',
-            enabled: true,
-          } satisfies BgMessage)
-          .catch(() => {})
-      }
       sendResponse({ ok: true })
       return false
 
@@ -208,7 +200,6 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
       status.analysing = true
       status.captureTabId = message.tabId
       status.captureLabel = message.label
-      status.captureMode = 'offscreen'
       status.error = null
       startLabelPoll()
       broadcastStatus()
@@ -219,22 +210,27 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
       status.analysing = false
       status.captureTabId = null
       status.captureLabel = null
-      status.captureMode = null
       stopLabelPoll()
       broadcastStatus()
+      broadcastBusReset()
       return false
 
     case 'OFFSCREEN_ERROR':
       status.error = message.error
       status.hasStream = false
       status.analysing = false
-      status.captureMode = null
       stopLabelPoll()
       broadcastStatus()
+      broadcastBusReset()
       return false
 
     case 'AUDIO_FRAME':
-      void forwardFrameToMonitron(message.frame)
+      // Ignore late frames after disconnect.
+      if (!status.hasStream) return false
+      // Popup bus always sees frames; Monitron pages only when reactive is on.
+      if (status.eqEnabled) {
+        void forwardFrameToMonitron(message.frame)
+      }
       chrome.runtime
         .sendMessage({ type: 'BUS_TAP', frame: message.frame } satisfies BgMessage)
         .catch(() => {})
@@ -254,7 +250,3 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 chrome.runtime.onInstalled.addListener(() => {
   console.info('[monitron] extension installed')
 })
-
-void chrome.sidePanel
-  .setOptions({ enabled: true, path: 'src/sidepanel/index.html' })
-  .catch(() => {})

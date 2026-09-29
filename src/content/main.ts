@@ -76,9 +76,6 @@ try {
     if (message.type === 'AUDIO_FRAME') {
       postToPage(message.frame)
     }
-    if (message.type === 'PING') {
-      announce()
-    }
   })
 } catch {
   // extension context already dead
