@@ -6,7 +6,7 @@
 
 Chrome extension that captures audio from a browser tab and feeds live EQ bands into **Monitron** dynamic screensavers on [Monitron](https://monitron-web-gamma.vercel.app/).
 
-Captures tab audio (`bass` / `mid` / `high` / `beat`) and streams them via `window.postMessage` to any allowlisted page that speaks the **audio bus** protocol.
+Captures tab audio as a **raw log-spaced spectrum** (`bands[32]` + `rms` / `peak`) and streams it via `window.postMessage` to any allowlisted page that speaks the **audio bus** protocol. Musical meaning (bass / mid / high / beat / BPM) is derived on the page.
 
 Source of truth in this repo: `src/shared/protocol.ts` (mirrors `monitron-web/lib/audioBus.ts`).
 
@@ -32,7 +32,7 @@ npm run build   # or: npm run dev
 
 1. Open https://monitron-web-gamma.vercel.app/ — open a **reactive** screen. The HUD should show the extension as online (`hello` / not offline).
 2. Focus a tab that is playing audio → extension popup → **connect**.
-3. Turn **reactive** on — the screen should move with bass / beat from `audio-frame`.
+3. Turn **reactive** on — the screen should move with the spectrum from `audio-frame`.
 4. Turn **reactive** off → page stops using bands; bus in the popup can still move while capture is up.
 
 ## Integrator API (page ↔ extension)
@@ -90,11 +90,11 @@ While capture is active and analysis is on, frames arrive at ~analyser rate:
 {
   source: "monitron-extension",
   type: "audio-frame",
-  t: 12345.6,   // performance-ish timestamp from analyser
-  bass: 0.0,    // 0..1
-  mid: 0.0,     // 0..1
-  high: 0.0,    // 0..1
-  beat: 0.0,    // 0..1 pulse / onset-ish
+  t: 12345.6,        // ms since capture start
+  sampleRate: 48000,
+  bands: [/* 32 floats 0..1, log 20Hz→16kHz */],
+  rms: 0.0,          // time-domain RMS 0..1
+  peak: 0.0,         // time-domain peak 0..1
 }
 ```
 
@@ -103,12 +103,12 @@ if (
     msg.source === "monitron-extension" &&
     msg.type === "audio-frame"
 ) {
-    const { t, bass, mid, high, beat } = msg;
-    // drive viz / shaders / rain / …
+    const { t, bands, rms, peak, sampleRate } = msg;
+    // derive EQ / onset on the page — drive viz / shaders / rain / …
 }
 ```
 
-Bands are normalized floats in **0..1**. No persistence — live only (no `localStorage` / `chrome.storage` bus).
+`bands` are normalized floats in **0..1**. No persistence — live only (no `localStorage` / `chrome.storage` bus). The extension does **not** emit named `bass` / `mid` / `high` / `beat`.
 
 ### Visualizer / analysis toggle (page → extension)
 
@@ -138,10 +138,10 @@ postMessage(
         source: "monitron-extension",
         type: "audio-frame",
         t: performance.now(),
-        bass: 1,
-        mid: 0.4,
-        high: 0.2,
-        beat: 1,
+        sampleRate: 48000,
+        bands: Array.from({ length: 32 }, (_, i) => (i < 8 ? 0.9 : 0.2)),
+        rms: 0.4,
+        peak: 0.7,
     },
     "*",
 );

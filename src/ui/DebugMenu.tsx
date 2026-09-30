@@ -1,26 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
 import type { BgMessage } from '@/shared/messages'
-import type { AudioFrame } from '@/shared/protocol'
+import { AUDIO_BAND_COUNT, type AudioFrame } from '@/shared/protocol'
 import { cn } from '@/lib/utils'
 
 type BusSnap = {
-  bass: number
-  mid: number
-  high: number
-  beat: number
+  bands: number[]
+  rms: number
+  peak: number
+  sampleRate: number
   t: number
   fps: number
 }
-
-const BANDS: {
-  key: keyof Pick<BusSnap, 'bass' | 'mid' | 'high' | 'beat'>
-  color: string
-}[] = [
-  { key: 'bass', color: 'bg-signal' },
-  { key: 'mid', color: 'bg-cyan' },
-  { key: 'high', color: 'bg-magenta' },
-  { key: 'beat', color: 'bg-warn' },
-]
 
 function fmt01(n: number) {
   return Math.min(1, Math.max(0, n)).toFixed(2)
@@ -60,6 +50,21 @@ function BandMeter({
   )
 }
 
+function SpectrumBars({ bands }: { bands: number[] }) {
+  return (
+    <div className="flex h-8 items-end gap-px border border-line bg-screen px-0.5 py-0.5">
+      {bands.map((v, i) => (
+        <div
+          key={i}
+          className="min-w-0 flex-1 bg-signal/80 transition-[height] duration-75"
+          style={{ height: `${Math.round(Math.min(1, Math.max(0, v)) * 100)}%` }}
+          title={`b${i}: ${fmt01(v)}`}
+        />
+      ))}
+    </div>
+  )
+}
+
 function useAudioBus() {
   const [bus, setBus] = useState<BusSnap | null>(null)
   const [lastFrameAgeMs, setLastFrameAgeMs] = useState<number | null>(null)
@@ -79,10 +84,10 @@ function useAudioBus() {
         receivedAt: 0,
       }
       setBus({
-        bass: 0,
-        mid: 0,
-        high: 0,
-        beat: 0,
+        bands: new Array(AUDIO_BAND_COUNT).fill(0),
+        rms: 0,
+        peak: 0,
+        sampleRate: 0,
         t: 0,
         fps: 0,
       })
@@ -113,10 +118,10 @@ function useAudioBus() {
       }
 
       setBus({
-        bass: frame.bass,
-        mid: frame.mid,
-        high: frame.high,
-        beat: frame.beat,
+        bands: frame.bands.slice(0, AUDIO_BAND_COUNT),
+        rms: frame.rms,
+        peak: frame.peak,
+        sampleRate: frame.sampleRate,
         t: frame.t,
         fps,
       })
@@ -141,7 +146,6 @@ function useAudioBus() {
 
   return {
     bus,
-    // frame.t is ms since capture start (same value shown as t=).
     busAgeMs: bus != null && bus.t > 0 ? bus.t : null,
     busLive: lastFrameAgeMs != null && lastFrameAgeMs < 500,
   }
@@ -156,6 +160,7 @@ function BusMeters({
   busAgeMs: number | null
   busLive: boolean
 }) {
+  const bands = bus?.bands ?? new Array(AUDIO_BAND_COUNT).fill(0)
   return (
     <div className="border border-line bg-screen/60 p-2 font-mono text-[10px] tracking-[0.04em]">
       <div className="mb-1.5 flex items-baseline justify-between gap-2">
@@ -170,18 +175,15 @@ function BusMeters({
             : 'no frames yet'}
         </span>
       </div>
-      <div className="flex flex-col gap-1">
-        {BANDS.map(({ key, color }) => (
-          <BandMeter
-            key={key}
-            label={key}
-            value={bus?.[key] ?? 0}
-            color={color}
-          />
-        ))}
+      <SpectrumBars bands={bands} />
+      <div className="mt-1.5 flex flex-col gap-1">
+        <BandMeter label="rms" value={bus?.rms ?? 0} color="bg-cyan" />
+        <BandMeter label="peak" value={bus?.peak ?? 0} color="bg-warn" />
       </div>
       <div className="mt-1.5 truncate text-[9px] text-muted">
-        t={bus ? bus.t.toFixed(1) : '—'}
+        t={bus ? bus.t.toFixed(1) : '—'} · sr=
+        {bus?.sampleRate ? Math.round(bus.sampleRate) : '—'} · n=
+        {AUDIO_BAND_COUNT}
       </div>
     </div>
   )
