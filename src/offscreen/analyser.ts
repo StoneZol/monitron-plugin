@@ -1,5 +1,11 @@
 import type { BgMessage } from '@/shared/messages'
-import { makeFrame } from '@/shared/protocol'
+import {
+  AUDIO_BAND_COUNT,
+  AUDIO_BAND_FMAX,
+  AUDIO_BAND_FMIN,
+  bandHzRange,
+  makeFrame,
+} from '@/shared/protocol'
 
 const FRAME_INTERVAL_MS = 1000 / 45
 
@@ -17,10 +23,6 @@ type AnalyserState = {
 let capture: AnalyserState | null = null
 let analysing = false
 let intervalId = 0
-let prevKick = 0
-let prevBeat = 0
-/** Rolling bass floor so sustained techno subs don't peg at 1.0 */
-let bassFloor = 0.25
 /** performance.now() when current capture started — frame.t is elapsed from here. */
 let captureT0 = 0
 
@@ -32,7 +34,7 @@ function hzToBin(hz: number, sampleRate: number, binCount: number) {
   return Math.round((hz / sampleRate) * binCount)
 }
 
-/** Mean energy 0..1 — no artificial gain (that was clipping bass on loud tracks). */
+/** Mean energy 0..1 across FFT bins [from, to). */
 function bandMean(data: Uint8Array<ArrayBuffer>, from: number, to: number) {
   const start = Math.max(0, Math.min(data.length - 1, from))
   const end = Math.max(start + 1, Math.min(data.length, to))
@@ -41,7 +43,11 @@ function bandMean(data: Uint8Array<ArrayBuffer>, from: number, to: number) {
   return sum / (end - start) / 255
 }
 
-function computeBands(state: AnalyserState) {
+/**
+ * Pack FFT into fixed log-spaced bands. No musical naming / onset here —
+ * the page derives bass/mid/high/beat from this.
+ */
+function packSpectrum(state: AnalyserState) {
   state.analyser.getByteFrequencyData(state.freq)
   state.analyser.getByteTimeDomainData(state.time)
   const { sampleRate } = state.ctx
@@ -54,56 +60,18 @@ function computeBands(state: AnalyserState) {
     td += v * v
     if (v > tdPeak) tdPeak = v
   }
-  td = Math.sqrt(td / state.time.length)
+  const rms = clip01(Math.sqrt(td / state.time.length))
+  const peak = clip01(tdPeak)
 
-  // Wide body for color drive; kick slice for onset / tempo
-  let bassRaw = bandMean(
-    state.freq,
-    hzToBin(30, sampleRate, bins),
-    hzToBin(180, sampleRate, bins),
-  )
-  const kick = bandMean(
-    state.freq,
-    hzToBin(50, sampleRate, bins),
-    hzToBin(120, sampleRate, bins),
-  )
-  let mid = bandMean(
-    state.freq,
-    hzToBin(200, sampleRate, bins),
-    hzToBin(2000, sampleRate, bins),
-  )
-  let high = bandMean(
-    state.freq,
-    hzToBin(2000, sampleRate, bins),
-    hzToBin(10000, sampleRate, bins),
-  )
-
-  if (bassRaw + mid + high < 0.015 && td > 0.01) {
-    const lift = clip01(td * 3)
-    bassRaw = lift
-    mid = clip01(lift * 0.7)
-    high = clip01(lift * 0.45)
+  const bands = new Array<number>(AUDIO_BAND_COUNT)
+  for (let i = 0; i < AUDIO_BAND_COUNT; i++) {
+    const { lo, hi } = bandHzRange(i, AUDIO_BAND_COUNT, AUDIO_BAND_FMIN, AUDIO_BAND_FMAX)
+    const from = hzToBin(lo, sampleRate, bins)
+    const to = hzToBin(hi, sampleRate, bins)
+    bands[i] = bandMean(state.freq, from, Math.max(from + 1, to))
   }
 
-  // Adaptive floor: sustained loud bass becomes the baseline, punch = above it
-  bassFloor = bassFloor * 0.98 + bassRaw * 0.02
-  const headroom = Math.max(0.12, 1 - bassFloor)
-  const bass = clip01((bassRaw - bassFloor * 0.85) / headroom)
-
-  // Kick onset — hard attack, medium decay so Matrix can ride the punch
-  const kickRise = Math.max(0, kick - prevKick)
-  const transient = Math.max(0, tdPeak - td * 1.4)
-  const onset = kickRise * 18 + transient * 2.8
-  const beat = clip01(Math.max(onset, prevBeat * 0.84))
-  prevKick = kick
-  prevBeat = beat
-
-  return {
-    bass,
-    mid: clip01(mid * 1.15),
-    high: clip01(high * 1.25),
-    beat,
-  }
+  return { bands, rms, peak, sampleRate }
 }
 
 function stopLoop() {
@@ -117,12 +85,12 @@ function stopLoop() {
 function tick() {
   if (!analysing || !capture) return
 
-  const bands = computeBands(capture)
+  const spectrum = packSpectrum(capture)
   const t = performance.now() - captureT0
   chrome.runtime
     .sendMessage({
       type: 'AUDIO_FRAME',
-      frame: makeFrame({ t, ...bands }),
+      frame: makeFrame({ t, ...spectrum }),
     } satisfies BgMessage)
     .catch(() => {})
 }
@@ -146,9 +114,6 @@ async function teardownCapture() {
   capture.stream.getTracks().forEach((t) => t.stop())
   await capture.ctx.close().catch(() => {})
   capture = null
-  prevKick = 0
-  prevBeat = 0
-  bassFloor = 0.25
   captureT0 = 0
   chrome.runtime
     .sendMessage({ type: 'OFFSCREEN_CAPTURE_STOPPED' } satisfies BgMessage)
@@ -191,7 +156,6 @@ async function startTabCapture(streamId: string, tabId: number, label: string) {
     const source = ctx.createMediaStreamSource(audioStream)
     const analyser = ctx.createAnalyser()
     analyser.fftSize = 2048
-    // Less smoothing → kicks read as onsets instead of a flat wall
     analyser.smoothingTimeConstant = 0.35
     analyser.minDecibels = -85
     analyser.maxDecibels = -25
@@ -200,8 +164,6 @@ async function startTabCapture(streamId: string, tabId: number, label: string) {
     source.connect(analyser)
     analyser.connect(ctx.destination)
 
-    // Suspended AudioContext ⇒ Chrome mutes the tab. Keep ctx awake without
-    // changing the audio graph / gain.
     ctx.onstatechange = () => ensureCtxRunning(ctx)
     const keepAliveId = window.setInterval(() => ensureCtxRunning(ctx), 500)
 
