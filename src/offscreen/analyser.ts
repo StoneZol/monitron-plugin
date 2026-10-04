@@ -3,7 +3,6 @@ import {
   AUDIO_BAND_COUNT,
   AUDIO_BAND_FMAX,
   AUDIO_BAND_FMIN,
-  bandHzRange,
   makeFrame,
 } from '@/shared/protocol'
 
@@ -30,28 +29,22 @@ function clip01(n: number) {
   return Math.min(1, Math.max(0, n))
 }
 
-function hzToBin(hz: number, sampleRate: number, binCount: number) {
-  return Math.round((hz / sampleRate) * binCount)
-}
-
-/** Mean energy 0..1 across FFT bins [from, to). */
-function bandMean(data: Uint8Array<ArrayBuffer>, from: number, to: number) {
-  const start = Math.max(0, Math.min(data.length - 1, from))
-  const end = Math.max(start + 1, Math.min(data.length, to))
-  let sum = 0
-  for (let i = start; i < end; i++) sum += data[i]!
-  return sum / (end - start) / 255
-}
-
 /**
  * Pack FFT into fixed log-spaced bands. No musical naming / onset here —
  * the page derives bass/mid/high/beat from this.
+ *
+ * Each FFT bin maps to exactly one log band (by bin center Hz). Empty bands
+ * (log slots thinner than one bin at the low end) are linearly interpolated
+ * so bass bars don't lock to a shared bin.
+ *
+ * Note: bin i ↔ hz = i * sampleRate / fftSize (fftSize = 2 * frequencyBinCount).
  */
 function packSpectrum(state: AnalyserState) {
   state.analyser.getByteFrequencyData(state.freq)
   state.analyser.getByteTimeDomainData(state.time)
   const { sampleRate } = state.ctx
   const bins = state.freq.length
+  const fftSize = bins * 2
 
   let td = 0
   let tdPeak = 0
@@ -63,12 +56,52 @@ function packSpectrum(state: AnalyserState) {
   const rms = clip01(Math.sqrt(td / state.time.length))
   const peak = clip01(tdPeak)
 
+  const logMin = Math.log(AUDIO_BAND_FMIN)
+  const logSpan = Math.log(AUDIO_BAND_FMAX) - logMin
+  const sums = new Float64Array(AUDIO_BAND_COUNT)
+  const counts = new Uint32Array(AUDIO_BAND_COUNT)
+
+  for (let bin = 1; bin < bins; bin++) {
+    const hz = (bin * sampleRate) / fftSize
+    if (hz < AUDIO_BAND_FMIN || hz > AUDIO_BAND_FMAX) continue
+    const t = (Math.log(hz) - logMin) / logSpan
+    const i = Math.min(
+      AUDIO_BAND_COUNT - 1,
+      Math.max(0, Math.floor(t * AUDIO_BAND_COUNT)),
+    )
+    sums[i]! += state.freq[bin]!
+    counts[i]! += 1
+  }
+
   const bands = new Array<number>(AUDIO_BAND_COUNT)
   for (let i = 0; i < AUDIO_BAND_COUNT; i++) {
-    const { lo, hi } = bandHzRange(i, AUDIO_BAND_COUNT, AUDIO_BAND_FMIN, AUDIO_BAND_FMAX)
-    const from = hzToBin(lo, sampleRate, bins)
-    const to = hzToBin(hi, sampleRate, bins)
-    bands[i] = bandMean(state.freq, from, Math.max(from + 1, to))
+    bands[i] = counts[i]! > 0 ? sums[i]! / counts[i]! / 255 : Number.NaN
+  }
+
+  let prev = -1
+  for (let i = 0; i < AUDIO_BAND_COUNT; i++) {
+    if (!Number.isFinite(bands[i]!)) continue
+    if (prev >= 0 && i - prev > 1) {
+      const a = bands[prev]!
+      const b = bands[i]!
+      const span = i - prev
+      for (let j = prev + 1; j < i; j++) {
+        const u = (j - prev) / span
+        bands[j] = a + (b - a) * u
+      }
+    } else if (prev < 0) {
+      for (let j = 0; j < i; j++) bands[j] = bands[i]!
+    }
+    prev = i
+  }
+  if (prev >= 0) {
+    for (let j = prev + 1; j < AUDIO_BAND_COUNT; j++) bands[j] = bands[prev]!
+  } else {
+    bands.fill(0)
+  }
+
+  for (let i = 0; i < AUDIO_BAND_COUNT; i++) {
+    bands[i] = clip01(bands[i]!)
   }
 
   return { bands, rms, peak, sampleRate }
@@ -155,7 +188,7 @@ async function startTabCapture(streamId: string, tabId: number, label: string) {
 
     const source = ctx.createMediaStreamSource(audioStream)
     const analyser = ctx.createAnalyser()
-    analyser.fftSize = 2048
+    analyser.fftSize = 4096
     analyser.smoothingTimeConstant = 0.35
     analyser.minDecibels = -85
     analyser.maxDecibels = -25
