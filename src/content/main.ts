@@ -75,6 +75,10 @@ try {
     if (!runtimeAlive()) return
     if (message.type === 'AUDIO_FRAME') {
       postToPage(message.frame)
+      return
+    }
+    if (message.type === 'TAB_TITLE') {
+      postToPage(message.msg)
     }
   })
 } catch {

@@ -1,6 +1,6 @@
 /** Internal extension messaging */
 
-import type { AudioFrame } from './protocol'
+import type { AudioFrame, AudioTabTitle } from './protocol'
 
 export {
   MONITORN_APP_URL,
@@ -55,4 +55,6 @@ export type BgMessage =
   | { type: 'OFFSCREEN_STOP_CAPTURE' }
   | { type: 'OFFSCREEN_SET_ANALYSING'; enabled: boolean }
 
-export type ContentMessage = { type: 'AUDIO_FRAME'; frame: AudioFrame }
+export type ContentMessage =
+  | { type: 'AUDIO_FRAME'; frame: AudioFrame }
+  | { type: 'TAB_TITLE'; msg: AudioTabTitle }

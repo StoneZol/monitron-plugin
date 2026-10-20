@@ -110,6 +110,21 @@ if (
 
 `bands` are normalized floats in **0..1**. No persistence — live only (no `localStorage` / `chrome.storage` bus). The extension does **not** emit named `bass` / `mid` / `high` / `beat`.
 
+### Tab title (extension → page)
+
+Parallel low-rate stream (≈1 Hz while a tab is captured; also on title change). **Not** attached to `audio-frame`. Independent of `visualizer-toggle` so the home page can show now-playing without opening a reactive screen.
+
+```js
+{
+  source: "monitron-extension",
+  type: "tab-title",
+  title: "Artist – Track · YouTube Music",  // captured tab's chrome.tabs title
+  t: 12345.6,                               // performance.now()-style ms
+}
+```
+
+The page dedupes `title` for track/tab-change triggers. Requires an active tab capture.
+
 ### Visualizer / analysis toggle (page → extension)
 
 Tell the extension whether the page wants analysis (saves CPU when viz is off):
@@ -145,6 +160,15 @@ postMessage(
     },
     "*",
 );
+postMessage(
+    {
+        source: "monitron-extension",
+        type: "tab-title",
+        title: "Artist – Track · YouTube Music",
+        t: performance.now(),
+    },
+    "*",
+);
 ```
 
 (Those fake posts only exercise _your_ page listener — they do not go through the extension.)
@@ -158,6 +182,7 @@ postMessage(
 | Hello            | `hello`              |
 | Hello request    | `hello-request`      |
 | Frame            | `audio-frame`        |
+| Tab title        | `tab-title`          |
 | Viz toggle       | `visualizer-toggle`  |
 
 ## Who needs host access?
@@ -194,11 +219,12 @@ Popup (focused tab → connect)
   → tabCapture.getMediaStreamId
   → offscreen (AudioContext + AnalyserNode)
   → background → content script on allowlisted receiver tabs
-  → window.postMessage(audio-frame)
+  → window.postMessage(audio-frame)     // high rate
+  → window.postMessage(tab-title)       // ~1 Hz / on change (parallel)
 
 Page visualizer-toggle
   → content script → background EQ_TOGGLE
-  → start/stop analysis
+  → start/stop analysis (+ immediate tab-title when enabled)
 ```
 
 UI: `src/ui/TabAudioPanel.tsx` (popup only). No side panel.
