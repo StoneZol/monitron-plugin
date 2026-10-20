@@ -196,13 +196,15 @@ Two different roles:
 
 `host_permissions` + `content_scripts.matches` come from **`src/shared/hosts.ts`**
 (`MONITORN_ORIGINS` → match patterns). That file is the only place to add/remove
-receiver sites (also drives `tabs.query` + popup feed link + “don’t capture viz”).
+receiver sites (also drives `tabs.query` + popup feed link). Receiver tabs can
+also be **capture sources** if they play audio.
 
 Current origins (see `hosts.ts`):
 
 - `http://localhost:3000`
 - `http://127.0.0.1:3000`
 - `https://monitron-web-gamma.vercel.app` — deploy / [library](https://monitron-web-gamma.vercel.app/)
+- `https://communityplaylist.com`
 
 For a **local fork**, add your origin to `MONITORN_ORIGINS` (and `MONITORN_APP_ORIGIN` if it should be the popup feed), rebuild, reload.
 
