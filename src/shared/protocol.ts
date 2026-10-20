@@ -7,6 +7,11 @@ export const AUDIO_FRAME_TYPE = 'audio-frame' as const
 export const AUDIO_HELLO_TYPE = 'hello' as const
 export const AUDIO_VIZ_TYPE = 'visualizer-toggle' as const
 export const AUDIO_HELLO_REQUEST_TYPE = 'hello-request' as const
+/**
+ * Low-rate now-playing tab title (~1 Hz or on change).
+ * Parallel to audio-frame — do not hang title on spectrum frames.
+ */
+export const AUDIO_TAB_TITLE_TYPE = 'tab-title' as const
 
 /** Log-spaced spectrum size — must match monitron-web */
 export const AUDIO_BAND_COUNT = 32
@@ -39,6 +44,16 @@ export type AudioVisualizerToggle = {
   source: typeof AUDIO_PAGE_SOURCE
   type: typeof AUDIO_VIZ_TYPE
   enabled: boolean
+}
+
+/** Extension → page: title of the tab currently playing (captured) audio */
+export type AudioTabTitle = {
+  source: typeof AUDIO_BUS_SOURCE
+  type: typeof AUDIO_TAB_TITLE_TYPE
+  /** chrome.tabs tab title / now-playing label */
+  title: string
+  /** Capture timestamp ms */
+  t: number
 }
 
 export function bandHzRange(
@@ -84,5 +99,14 @@ export function makeFrame(
     source: AUDIO_BUS_SOURCE,
     type: AUDIO_FRAME_TYPE,
     ...payload,
+  }
+}
+
+export function makeTabTitle(title: string, t = performance.now()): AudioTabTitle {
+  return {
+    source: AUDIO_BUS_SOURCE,
+    type: AUDIO_TAB_TITLE_TYPE,
+    title,
+    t,
   }
 }

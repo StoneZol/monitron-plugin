@@ -1,6 +1,6 @@
-import type { BgMessage, ExtensionStatus } from '@/shared/messages'
+import type { BgMessage, ContentMessage, ExtensionStatus } from '@/shared/messages'
 import { MONITORN_TAB_URLS } from '@/shared/messages'
-import type { AudioFrame } from '@/shared/protocol'
+import { makeTabTitle, type AudioFrame } from '@/shared/protocol'
 
 const status: ExtensionStatus = {
   hasStream: false,
@@ -74,15 +74,21 @@ function broadcastBusReset() {
 }
 
 /** Keep header `src://` in sync when YouTube (etc.) renames the tab. */
-async function syncCaptureLabel() {
+async function syncCaptureLabel(opts?: { forceTitle?: boolean }) {
   const tabId = status.captureTabId
   if (tabId == null || !status.hasStream) return
   try {
     const tab = await chrome.tabs.get(tabId)
     const next = tab.title?.trim() || tab.url || `Tab ${tabId}`
-    if (next === status.captureLabel) return
-    status.captureLabel = next
-    broadcastStatus()
+    const changed = next !== status.captureLabel
+    if (changed) {
+      status.captureLabel = next
+      broadcastStatus()
+    }
+    // Low-rate page contract: ~1 Hz tick, or immediately on title change.
+    if (changed || opts?.forceTitle) {
+      void forwardTabTitleToMonitron(next)
+    }
   } catch {
     /* tab gone — stopCapture handles teardown elsewhere */
   }
@@ -92,8 +98,12 @@ let labelPollTimer: ReturnType<typeof setInterval> | null = null
 
 function startLabelPoll() {
   stopLabelPoll()
-  void syncCaptureLabel()
-  labelPollTimer = setInterval(() => void syncCaptureLabel(), 2000)
+  void syncCaptureLabel({ forceTitle: true })
+  // ~1 Hz — matches monitron-web tab-title contract
+  labelPollTimer = setInterval(
+    () => void syncCaptureLabel({ forceTitle: true }),
+    1000,
+  )
 }
 
 function stopLabelPoll() {
@@ -102,21 +112,34 @@ function stopLabelPoll() {
   labelPollTimer = null
 }
 
-async function forwardFrameToMonitron(frame: AudioFrame) {
+async function forwardToMonitronTabs(message: ContentMessage) {
   const tabs = await chrome.tabs.query({ url: [...MONITORN_TAB_URLS] })
   await Promise.all(
     tabs.map(async (tab) => {
       if (tab.id == null) return
       try {
-        await chrome.tabs.sendMessage(tab.id, {
-          type: 'AUDIO_FRAME',
-          frame,
-        })
+        await chrome.tabs.sendMessage(tab.id, message)
       } catch {
         /* ignore */
       }
     }),
   )
+}
+
+async function forwardFrameToMonitron(frame: AudioFrame) {
+  await forwardToMonitronTabs({ type: 'AUDIO_FRAME', frame })
+}
+
+/**
+ * Parallel to audio-frame. Sends whenever a tab is captured — not gated on
+ * reactive/eq — so the home page can show now-playing without viz lease.
+ */
+async function forwardTabTitleToMonitron(title: string) {
+  if (!status.hasStream) return
+  await forwardToMonitronTabs({
+    type: 'TAB_TITLE',
+    msg: makeTabTitle(title),
+  })
 }
 
 async function startCapture(
@@ -187,6 +210,9 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
     case 'EQ_TOGGLE':
       status.eqEnabled = message.enabled
       broadcastStatus()
+      if (message.enabled && status.hasStream && status.captureLabel) {
+        void forwardTabTitleToMonitron(status.captureLabel)
+      }
       sendResponse({ ok: true })
       return false
 
