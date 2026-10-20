@@ -8,6 +8,7 @@ export const MONITORN_ORIGINS = [
   'http://localhost:3000',
   'http://127.0.0.1:3000',
   'https://monitron-web-gamma.vercel.app',
+  'https://communityplaylist.com',
 ] as const
 
 export type MonitronOrigin = (typeof MONITORN_ORIGINS)[number]
@@ -27,7 +28,10 @@ export const MONITORN_APP_URL = `${MONITORN_APP_ORIGIN}/`
 
 const ORIGIN_SET = new Set<string>(MONITORN_ORIGINS)
 
-/** True for viz / Matrix pages that receive AUDIO_FRAME — never capture these. */
+/**
+ * True for known Monitron receiver origins (content script / frame fan-out).
+ * Capture is allowed on these too — screens may play audio later.
+ */
 export function isMonitronTabUrl(url: string): boolean {
   try {
     return ORIGIN_SET.has(new URL(url).origin)
