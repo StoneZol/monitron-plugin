@@ -1,5 +1,8 @@
 import type { BgMessage, ContentMessage, ExtensionStatus } from '@/shared/messages'
-import { MONITORN_TAB_URLS } from '@/shared/messages'
+import {
+  isMonitronFeedTabUrl,
+  MONITORN_TAB_URLS,
+} from '@/shared/messages'
 import { makeTabTitle, type AudioFrame } from '@/shared/protocol'
 
 const status: ExtensionStatus = {
@@ -198,9 +201,27 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
       return false
 
     case 'START_CAPTURE':
-      void startCapture(message.streamId, message.tabId, message.label).then(
-        (result) => sendResponse(result),
-      )
+      void (async () => {
+        try {
+          const tab = await chrome.tabs.get(message.tabId)
+          const url = tab.url || tab.pendingUrl || ''
+          if (url && isMonitronFeedTabUrl(url)) {
+            sendResponse({
+              ok: false,
+              error: 'Monitron feed tabs cannot be captured',
+            })
+            return
+          }
+        } catch {
+          /* tab may be gone — let startCapture fail normally */
+        }
+        const result = await startCapture(
+          message.streamId,
+          message.tabId,
+          message.label,
+        )
+        sendResponse(result)
+      })()
       return true
 
     case 'STOP_CAPTURE':

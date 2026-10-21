@@ -7,7 +7,11 @@ export {
   MONITORN_MATCH_PATTERNS,
   MONITORN_ORIGINS,
   MONITORN_TAB_URLS,
+  isLocalMonitronTabUrl,
+  isMonitronCaptureBlocked,
+  isMonitronFeedTabUrl,
   isMonitronTabUrl,
+  isPartnerMonitronTabUrl,
 } from './hosts'
 
 export type ExtensionStatus = {

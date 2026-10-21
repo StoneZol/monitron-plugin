@@ -21,6 +21,8 @@ export const AUDIO_BAND_FMAX = 16000
 export type AudioHello = {
   source: typeof AUDIO_BUS_SOURCE
   type: typeof AUDIO_HELLO_TYPE
+  /** Extension manifest version — shown on Monitron home / header */
+  version: string
 }
 
 export type AudioHelloRequest = {
@@ -88,8 +90,20 @@ export function isHelloRequest(data: unknown): data is AudioHelloRequest {
   )
 }
 
-export function makeHello(): AudioHello {
-  return { source: AUDIO_BUS_SOURCE, type: AUDIO_HELLO_TYPE }
+export function makeHello(version?: string): AudioHello {
+  let v = version
+  if (!v) {
+    try {
+      v = chrome.runtime.getManifest().version
+    } catch {
+      v = '0.0.0'
+    }
+  }
+  return {
+    source: AUDIO_BUS_SOURCE,
+    type: AUDIO_HELLO_TYPE,
+    version: v,
+  }
 }
 
 export function makeFrame(
