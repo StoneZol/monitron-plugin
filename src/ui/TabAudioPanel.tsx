@@ -3,7 +3,9 @@ import {
   type ExtensionStatus,
   type TabInfo,
   MONITORN_APP_URL,
-  isMonitronTabUrl,
+  isLocalMonitronTabUrl,
+  isMonitronFeedTabUrl,
+  isPartnerMonitronTabUrl,
 } from '@/shared/messages'
 import { cn } from '@/lib/utils'
 import { captureTabStreamId } from '@/ui/captureTab'
@@ -36,8 +38,10 @@ function hostOf(url: string) {
 }
 
 function isCapturable(url: string) {
-  // Any http(s) tab — including Monitron receivers (they may play audio later)
-  return url.startsWith('http://') || url.startsWith('https://')
+  if (!url.startsWith('http://') && !url.startsWith('https://')) return false
+  // Our deployed feed only — partners + localhost stay capturable.
+  if (isMonitronFeedTabUrl(url)) return false
+  return true
 }
 
 function tabFromChrome(tab: chrome.tabs.Tab): TabInfo | null {
@@ -172,11 +176,18 @@ export function TabAudioPanel() {
     }
   }
 
-  const onReceiver = focused != null && isMonitronTabUrl(focused.url)
+  // Deployed Monitron feed only — hide connect/switch (like ≤1.4 viz page).
+  const onFeedPage =
+    focused != null && isMonitronFeedTabUrl(focused.url)
+  const onLocalDev =
+    focused != null && isLocalMonitronTabUrl(focused.url)
+  const onPartner =
+    focused != null && isPartnerMonitronTabUrl(focused.url)
   const connectedHere =
     status.hasStream && focused != null && status.captureTabId === focused.id
   const canConnect =
     focused != null && isCapturable(focused.url) && !connectedHere
+  const pluginVersion = chrome.runtime.getManifest().version
 
   return (
     <div className="atmosphere relative flex flex-col gap-3 p-3.5 pb-4">
@@ -190,7 +201,7 @@ export function TabAudioPanel() {
               Monitron
             </h1>
             <p className="mt-1 mb-0 font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
-              tab audio // stream
+              tab audio // stream // v{pluginVersion}
             </p>
           </div>
           <a
@@ -226,21 +237,34 @@ export function TabAudioPanel() {
           )}
         </section>
 
-        <p className="m-0 text-[12px] leading-snug text-muted">
-          Focus the tab you want, then{' '}
-          <span className="text-cyan">connect</span>
-          {onReceiver ? (
-            <>
-              {' '}
-              — this is a <span className="text-cyan">receiver</span> tab (ok
-              if it plays audio).
-            </>
-          ) : (
-            '.'
-          )}
-        </p>
+        {onFeedPage ? (
+          <p className="m-0 text-[12px] leading-snug text-muted">
+            This tab is the{' '}
+            <span className="text-cyan">Monitron feed</span> — it plays its
+            own audio. Open a music tab, then connect.
+          </p>
+        ) : (
+          <p className="m-0 text-[12px] leading-snug text-muted">
+            Focus the tab you want, then{' '}
+            <span className="text-cyan">connect</span>
+            {onLocalDev ? (
+              <>
+                {' '}
+                — <span className="text-cyan">localhost</span> allowed for
+                player / plugin dev.
+              </>
+            ) : onPartner ? (
+              <>
+                {' '}
+                — partner receiver; capture ok.
+              </>
+            ) : (
+              '.'
+            )}
+          </p>
+        )}
 
-        {status.hasStream && !connectedHere && (
+        {status.hasStream && (onFeedPage || !connectedHere) && (
           <section className="border border-signal/40 bg-signal/5 p-3">
             <p className="m-0 font-mono text-[9px] uppercase tracking-[0.2em] text-signal">
               ::live source
@@ -262,84 +286,86 @@ export function TabAudioPanel() {
           </section>
         )}
 
-        <section
-          className={cn(
-            'border border-line bg-screen/70 p-3',
-            connectedHere &&
-              'border-signal/50 shadow-[3px_3px_0_var(--magenta)]',
-          )}
-        >
-          <div className="flex items-baseline justify-between gap-2">
-            <p className="m-0 font-mono text-[9px] uppercase tracking-[0.2em] text-signal">
-              {connectedHere ? '::streaming' : '::focused tab'}
-            </p>
-            {focused?.audible && (
-              <span className="font-mono text-[10px] text-signal">
-                ♪ audible
-              </span>
+        {!onFeedPage && (
+          <section
+            className={cn(
+              'border border-line bg-screen/70 p-3',
+              connectedHere &&
+                'border-signal/50 shadow-[3px_3px_0_var(--magenta)]',
             )}
-          </div>
-
-          {focused ? (
-            <div className="mt-3 flex items-start gap-3">
-              {focused.favIconUrl ? (
-                <img
-                  src={focused.favIconUrl}
-                  alt=""
-                  className="mt-0.5 h-10 w-10 shrink-0 border border-line bg-bg-deep object-contain p-1"
-                />
-              ) : (
-                <span className="mt-0.5 inline-block h-10 w-10 shrink-0 border border-line bg-line/40" />
+          >
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="m-0 font-mono text-[9px] uppercase tracking-[0.2em] text-signal">
+                {connectedHere ? '::streaming' : '::focused tab'}
+              </p>
+              {focused?.audible && (
+                <span className="font-mono text-[10px] text-signal">
+                  ♪ audible
+                </span>
               )}
-              <div className="min-w-0 flex-1">
-                <h2 className="m-0 line-clamp-2 text-[15px] font-semibold uppercase leading-snug tracking-tight text-ink">
-                  {focused.title}
-                </h2>
-                <p
-                  className="mt-1 mb-0 truncate font-mono text-[10px] tracking-[0.06em] text-cyan"
-                  title={focused.url}
-                >
-                  {shortUrl(focused.url) || hostOf(focused.url) || '—'}
-                </p>
-                {!isCapturable(focused.url) && (
-                  <p className="mt-2 mb-0 font-mono text-[10px] text-warn">
-                    chrome:// and extension pages can&apos;t be captured
-                  </p>
-                )}
-              </div>
             </div>
-          ) : (
-            <p className="mt-3 mb-0 font-mono text-[10px] uppercase tracking-[0.16em] text-muted">
-              no focused http(s) tab
-            </p>
-          )}
 
-          <div className="mt-3 flex flex-col gap-2">
-            {connectedHere ? (
-              <button
-                type="button"
-                className="btn-stamp btn-stamp-warn w-full"
-                onClick={() => void stop()}
-                disabled={loading}
-              >
-                <span className="text-magenta">×</span> disconnect
-              </button>
+            {focused ? (
+              <div className="mt-3 flex items-start gap-3">
+                {focused.favIconUrl ? (
+                  <img
+                    src={focused.favIconUrl}
+                    alt=""
+                    className="mt-0.5 h-10 w-10 shrink-0 border border-line bg-bg-deep object-contain p-1"
+                  />
+                ) : (
+                  <span className="mt-0.5 inline-block h-10 w-10 shrink-0 border border-line bg-line/40" />
+                )}
+                <div className="min-w-0 flex-1">
+                  <h2 className="m-0 line-clamp-2 text-[15px] font-semibold uppercase leading-snug tracking-tight text-ink">
+                    {focused.title}
+                  </h2>
+                  <p
+                    className="mt-1 mb-0 truncate font-mono text-[10px] tracking-[0.06em] text-cyan"
+                    title={focused.url}
+                  >
+                    {shortUrl(focused.url) || hostOf(focused.url) || '—'}
+                  </p>
+                  {!isCapturable(focused.url) && (
+                    <p className="mt-2 mb-0 font-mono text-[10px] text-warn">
+                      chrome:// and extension pages can&apos;t be captured
+                    </p>
+                  )}
+                </div>
+              </div>
             ) : (
-              <button
-                type="button"
-                className="btn-stamp w-full !py-2.5 !text-[11px] !tracking-[0.28em]"
-                disabled={loading || !canConnect}
-                onClick={() => focused && void connect(focused)}
-              >
-                {loading
-                  ? '…'
-                  : status.hasStream
-                    ? 'switch → connect'
-                    : 'connect'}
-              </button>
+              <p className="mt-3 mb-0 font-mono text-[10px] uppercase tracking-[0.16em] text-muted">
+                no focused http(s) tab
+              </p>
             )}
-          </div>
-        </section>
+
+            <div className="mt-3 flex flex-col gap-2">
+              {connectedHere ? (
+                <button
+                  type="button"
+                  className="btn-stamp btn-stamp-warn w-full"
+                  onClick={() => void stop()}
+                  disabled={loading}
+                >
+                  <span className="text-magenta">×</span> disconnect
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="btn-stamp w-full !py-2.5 !text-[11px] !tracking-[0.28em]"
+                  disabled={loading || !canConnect}
+                  onClick={() => focused && void connect(focused)}
+                >
+                  {loading
+                    ? '…'
+                    : status.hasStream
+                      ? 'switch → connect'
+                      : 'connect'}
+                </button>
+              )}
+            </div>
+          </section>
+        )}
 
         <DebugMenu />
       </div>
